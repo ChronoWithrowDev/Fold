@@ -1,0 +1,73 @@
+name: Build The Fold Windows Launcher
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows Installers
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out game
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Find game project
+        shell: pwsh
+        run: |
+          $scripts = Get-ChildItem -Path . -Filter package-windows.mjs -Recurse -File |
+            Where-Object {
+              $_.FullName -match '[\\/]desktop[\\/]package-windows\.mjs$' -and
+              $_.FullName -notmatch '[\\/](node_modules|\.git|\.staging)[\\/]'
+            }
+
+          if (-not $scripts) {
+            throw "Could not find desktop/package-windows.mjs."
+          }
+
+          $game = Split-Path (Split-Path $scripts[0].FullName -Parent) -Parent
+
+          "GAME_DIR=$game" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "Game folder: $game"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          Set-Location $env:GAME_DIR
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build game
+        shell: pwsh
+        run: |
+          Set-Location $env:GAME_DIR
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package Windows installers
+        shell: pwsh
+        run: |
+          Set-Location $env:GAME_DIR
+          node desktop/package-windows.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: The-Fold-Walsenburg-Windows-Installers
+          path: |
+            **/release/*.exe
+          if-no-files-found: error
+          retention-days: 30
